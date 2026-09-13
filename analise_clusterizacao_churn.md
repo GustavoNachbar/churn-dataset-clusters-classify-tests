@@ -114,18 +114,30 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 
 ### 4.2 Resultados
 
-| k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
-|---|---|---|---|---|---|
-| 2 | | | | | |
-| 3 | | | | | |
-| 4 | | | | | |
-| 5 | | | | | |
-| 6 | | | | | |
-| 7 | | | | | |
+| k | Linkage | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
+|---|---|---|---|---|---|---|
+| 2 | ward | 0.1638 | 2.1841 | 191.81 | 0.1598 | 0.2372 |
+| 3 | ward | 0.1616 | 1.9988 | **212.37** | **0.6574** | 0.1302 |
+| 4 | ward | 0.1189 | 2.0308 | 192.90 | 0.4227 | 0.0797 |
+| 5 | ward | 0.1018 | 1.8302 | 177.07 | 0.4385 | 0.0687 |
+| 6 | ward | 0.0909 | **1.7268** | 160.20 | 0.4431 | 0.0648 |
+| 7 | ward | 0.0967 | 1.8473 | 149.76 | 0.3797 | 0.0576 |
 
 ### 4.3 Interpretação
 
-*(preencher após rodar os testes)*
+- **k=3 se destaca isoladamente como o melhor k do algoritmo**: maior estabilidade da tabela
+  (ARI de 0.657, bem à frente de qualquer outro k), maior Calinski-Harabasz (212.37) e segundo
+  melhor silhouette (0.162, praticamente empatado com k=2).
+- **k=2, apesar do melhor silhouette (0.164) e CH razoável, é descartado**: sua estabilidade
+  (0.160) é baixa e o desvio-padrão (0.237) é maior que a própria média — sinal de resultado
+  essencialmente instável/próximo do acaso, o mesmo padrão de alerta visto no k-means e no
+  k-medoids para k's com métricas isoladas boas mas instáveis.
+- **k=5 e k=6 formam um segundo grupo competitivo em estabilidade** (0.438 e 0.443,
+  respectivamente), com k=6 tendo o melhor Davies-Bouldin da tabela (1.727) — mas nenhum dos
+  dois chega perto da estabilidade de k=3.
+- **Candidatos selecionados para classificação: k=3 e k=6** — k=3 pela combinação isolada de
+  estabilidade e Calinski-Harabasz mais fortes; k=6 como segundo candidato, pelo melhor
+  Davies-Bouldin e estabilidade competitiva (levemente acima de k=5).
 
 ---
 
@@ -261,9 +273,32 @@ Mesmo setup da seção 5.1 (mesmo split treino/teste, mesma grid search), usando
 
 ## 7. Comparação entre algoritmos
 
-*(preencher depois de rodar todos os algoritmos — qual algoritmo + k deu a melhor combinação
-de separação e estabilidade, e se as segmentações resultantes fazem sentido de negócio quando
-se olha o perfil médio de cada cluster nas variáveis originais)*
+### 7.1 Clusterização — melhor k de cada algoritmo (métricas internas)
+
+| Algoritmo | Melhor k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) |
+|---|---|---|---|---|---|
+| **K-Means** | k=4 | 0.162 | 1.826 | **230.98** | **0.870** |
+| Agglomerative (ward) | k=3 | 0.162 | 1.999 | 212.37 | 0.657 |
+| K-Medoids | k=7 | 0.120 | 1.771 | 157.93 | 0.260 |
+
+**Ranking de qualidade de clusterização: K-Means > Agglomerative > K-Medoids.** O k-means vence
+com folga em estabilidade (a métrica mais decisiva) e em Calinski-Harabasz; o Agglomerative fica
+em segundo lugar competitivo (estabilidade de 0.657 não é desprezível); o K-Medoids é claramente
+o mais fraco dos três em praticamente todas as métricas.
+
+### 7.2 Ressalva importante — clusterização ≠ poder preditivo
+
+Como já vimos nas seções 5 e 6, "melhor clusterização" (métricas internas) e "melhor feature para
+prever `Saiu`" (métricas de classificação) já se mostraram coisas diferentes: o k=4 do k-means,
+vencedor isolado em estabilidade, foi o pior para árvore de decisão e Random Forest, e só se
+revelou útil no XGBoost. Por isso, o ranking acima **não define sozinho** qual algoritmo/k deve
+seguir para a etapa de classificação — ele serve para justificar a escolha dos candidatos
+(k-means k=3/k=4, Agglomerative k=3/k=6, K-Medoids k=6/k=7), mas a palavra final depende de como
+cada um se sai nos classificadores (árvore, Random Forest, XGBoost, SVM, Naive Bayes + baseline).
+
+*(preencher, após testar os candidatos de Agglomerative e K-Medoids nos classificadores: qual
+combinação algoritmo + k + classificador deu o melhor resultado preditivo, e se as segmentações
+fazem sentido de negócio ao olhar o perfil médio de cada cluster nas variáveis originais)*
 
 ---
 
