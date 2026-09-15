@@ -101,6 +101,23 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
   k=6/k=7 do K-Medoids forem testados nos classificadores (lembrando que k=4 do k-means, apesar
   de "vencedor" na clusterização, só se mostrou útil como feature preditiva no XGBoost).
 
+### 3.4 Métricas na base geral (df_treino completo)
+
+Recalculadas reaproveitando os labels já gerados em `Cluster_k6`/`Cluster_k7` no `df_treino`
+completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` próprio dessa base.
+
+| k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
+|---|---|---|---|---|---|
+| 6 | 0.1323 | 1.8744 | 804.23 | 0.2859 | 0.0571 |
+| 7 | 0.1306 | 1.8300 | 772.90 | 0.2694 | 0.0538 |
+
+- Padrão qualitativamente igual ao da base de cancelados: separação fraca (silhouette baixo) e
+  estabilidade modesta, bem abaixo do k-means. k=6 continua levemente à frente de k=7 (estabilidade
+  0.286 vs 0.269), mesma hierarquia da base de cancelados.
+- Calinski-Harabasz não é comparável entre as duas bases (cresce com o tamanho da amostra: ~7.000
+  vs ~1.426 clientes) — a diferença de escala não indica melhora real de separação.
+- Não há motivo, com esses números, para reconsiderar os candidatos já escolhidos (k=6 e k=7).
+
 ---
 
 ## 4. Agglomerative Clustering (Clustering Hierárquico)
@@ -138,6 +155,25 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 - **Candidatos selecionados para classificação: k=3 e k=6** — k=3 pela combinação isolada de
   estabilidade e Calinski-Harabasz mais fortes; k=6 como segundo candidato, pelo melhor
   Davies-Bouldin e estabilidade competitiva (levemente acima de k=5).
+
+### 4.4 Métricas na base geral (df_treino completo)
+
+Recalculadas reaproveitando os labels já gerados em `Cluster_k3`/`Cluster_k6` no `df_treino`
+completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` próprio dessa base.
+
+| k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
+|---|---|---|---|---|---|
+| 3 | **0.1502** | 2.1211 | 1023.66 | **0.7002** | 0.1696 |
+| 6 | 0.1051 | **1.8670** | 772.37 | 0.5631 | 0.0915 |
+
+- **k=3 continua vencendo k=6 com folga**, agora com vantagem ainda maior em estabilidade (0.700
+  vs 0.563) do que na base de cancelados (0.657 vs 0.443). Davies-Bouldin favorece levemente k=6,
+  mas não compensa a diferença em estabilidade e silhouette a favor de k=3.
+- Calinski-Harabasz não é comparável entre as duas bases (mesmo efeito de escala do K-Medoids).
+- **Comparando com o K-Medoids na base geral**: o Agglomerative k=3 (estabilidade 0.700) é
+  disparado mais forte que o melhor resultado do K-Medoids (k=6, estabilidade 0.286) — mais que
+  o dobro. Entre os dois "desafiantes" do k-means, o **Agglomerative k=3** é o candidato mais
+  promissor para competir na etapa de classificação.
 
 ---
 
@@ -273,7 +309,50 @@ Mesmo setup da seção 5.1 (mesmo split treino/teste, mesma grid search), usando
 
 ## 7. Comparação entre algoritmos
 
-### 7.1 Clusterização — melhor k de cada algoritmo (métricas internas)
+### 7.1 Ranking geral de todos os k's testados (score composto)
+
+**Metodologia**: cada métrica foi normalizada (min-max) entre os 19 resultados (7 do K-Means,
+6 do Agglomerative, 6 do K-Medoids, todos calculados em `df_treino_cancelamento`); Davies-Bouldin
+foi invertido antes de normalizar (menor valor bruto = melhor). Score final = 40% estabilidade +
+20% silhouette + 20% Davies-Bouldin + 20% Calinski-Harabasz — peso maior na estabilidade por ser,
+empiricamente, a métrica mais decisiva neste estudo.
+
+| # | Algoritmo | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade | Score | Confiabilidade |
+|---|---|---|---|---|---|---|---|---|
+| 1 | K-Means | 4 | 0.162 | 1.826 | 230.98 | 0.870 | **0.918** | OK |
+| 2 | K-Means | 3 | 0.178 | 1.881 | 227.45 | 0.536 | 0.770 | OK |
+| 3 | K-Means | 2 | 0.172 | 2.160 | 229.54 | 0.641 | 0.764 | ⚠️ desvio elevado (0.447) |
+| 4 | Agglomerative | 3 | 0.162 | 1.999 | 212.37 | 0.657 | 0.734 | OK |
+| 5 | K-Means | 5 | 0.143 | 1.673 | 213.64 | 0.598 | 0.724 | OK |
+| 6 | K-Means | 6 | 0.142 | 1.587 | 199.57 | 0.569 | 0.689 | OK |
+| 7 | K-Means | 7 | 0.144 | 1.578 | 187.86 | 0.508 | 0.636 | OK |
+| 8 | K-Means | 8 | 0.145 | 1.599 | 180.34 | 0.515 | 0.620 | OK |
+| 9 | Agglomerative | 4 | 0.119 | 2.031 | 192.90 | 0.423 | 0.466 | OK |
+| 10 | Agglomerative | 5 | 0.102 | 1.830 | 177.07 | 0.439 | 0.432 | OK |
+| 11 | Agglomerative | 2 | 0.164 | 2.184 | 191.81 | 0.160 | 0.407 | 🚫 desvio (0.237) > média |
+| 12 | Agglomerative | 6 | 0.091 | 1.727 | 160.20 | 0.443 | 0.386 | OK |
+| 13 | K-Medoids | 7 | 0.120 | 1.771 | 157.93 | 0.260 | 0.349 | OK |
+| 14 | K-Medoids | 6 | 0.109 | 1.776 | 158.50 | 0.262 | 0.325 | OK |
+| 15 | K-Medoids | 5 | 0.116 | 1.889 | 164.82 | 0.234 | 0.322 | OK |
+| 16 | Agglomerative | 7 | 0.097 | 1.847 | 149.76 | 0.380 | 0.321 | OK |
+| 17 | K-Medoids | 4 | 0.103 | 2.074 | 160.24 | 0.162 | 0.211 | OK |
+| 18 | K-Medoids | 2 | 0.117 | 2.678 | 184.02 | 0.065 | 0.145 | 🚫 desvio (0.081) > média |
+| 19 | K-Medoids | 3 | 0.097 | 2.361 | 159.32 | 0.124 | 0.124 | OK |
+
+**Leituras principais:**
+- **K-Means k=4 confirma-se como o melhor de todos** os 19 candidatos, com folga expressiva para
+  o segundo colocado.
+- **Os 6 primeiros lugares são todos do K-Means** — reforça que ele é, disparado, o algoritmo
+  mais forte de clusterização para este dataset.
+- **O melhor resultado do Agglomerative (k=3) fica em 4º lugar geral**, à frente de vários k's
+  do próprio K-Means (5, 6, 7, 8).
+- **O K-Medoids nunca aparece antes da 13ª posição** — confirma que é o mais fraco dos três
+  algoritmos em qualquer recorte.
+- Linhas marcadas com 🚫 (Agglomerative k=2 e K-Medoids k=2) têm desvio-padrão de estabilidade
+  maior que a própria média — resultado próximo do acaso, apesar de entrarem bem posicionadas
+  no score composto; tratar com desconfiança mesmo com score aparentemente competitivo.
+
+### 7.2 Clusterização — melhor k de cada algoritmo (métricas internas)
 
 | Algoritmo | Melhor k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) |
 |---|---|---|---|---|---|
@@ -286,7 +365,7 @@ com folga em estabilidade (a métrica mais decisiva) e em Calinski-Harabasz; o A
 em segundo lugar competitivo (estabilidade de 0.657 não é desprezível); o K-Medoids é claramente
 o mais fraco dos três em praticamente todas as métricas.
 
-### 7.2 Ressalva importante — clusterização ≠ poder preditivo
+### 7.3 Ressalva importante — clusterização ≠ poder preditivo
 
 Como já vimos nas seções 5 e 6, "melhor clusterização" (métricas internas) e "melhor feature para
 prever `Saiu`" (métricas de classificação) já se mostraram coisas diferentes: o k=4 do k-means,
