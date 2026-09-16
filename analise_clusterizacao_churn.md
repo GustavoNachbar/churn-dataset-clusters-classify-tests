@@ -5,9 +5,13 @@ cancelaram (`Saiu == 1`), usando as variáveis `PontuacaoCredito`, `Idade`, `Tem
 `Saldo`, `NumeroProdutos` e `SalarioEstimado` (padronizadas), para identificar perfis distintos
 de churn e validar qual número de clusters melhor representa a estrutura dos dados.
 
+**Estrutura do documento:** clusterização (algoritmos → métricas) → classificação (algoritmos →
+métricas) → conclusão. Cada bloco de "algoritmos" traz o setup/código; cada bloco de "métricas"
+traz resultados, interpretação e comparações.
+
 ---
 
-## 1. Glossário das métricas
+## 1. Glossário das métricas de clusterização
 
 | Métrica | O que mede | Direção ideal | Observações |
 |---|---|---|---|
@@ -19,15 +23,35 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 
 ---
 
-## 2. K-Means
+## 2. Algoritmos de Clusterização (setup)
 
-### 2.1 Setup
+### 2.1 K-Means
 
 - Pré-processamento: `StandardScaler` nas 6 variáveis numéricas, ajustado em `df_treino_cancelamento`
 - `KMeans(n_init=10, random_state=42)`, testado para k = 2 a 8
 - Estabilidade: bootstrap com 30 reamostragens, 80% dos dados por rodada, comparação via Adjusted Rand Index (ARI) contra o clustering na base completa
 
-### 2.2 Resultados
+### 2.2 K-Medoids
+
+- Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler` (ajustado separadamente para
+  essa base, não reaproveitado do `df_treino` completo).
+- `KMedoids(method='alternate', init='k-medoids++', random_state=42)`, testado para k = 2 a 7.
+- Estabilidade calculada com a mesma lógica de bootstrap + ARI usada no k-means.
+
+### 2.3 Agglomerative Clustering (Clustering Hierárquico)
+
+- Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler`.
+- `AgglomerativeClustering(linkage='ward')`, testado para k = 2 a 7.
+- Estabilidade calculada com a mesma lógica de bootstrap + ARI (sem `random_state`, já que o
+  algoritmo é determinístico dado o dataset). Diferente do K-Means e K-Medoids, não possui
+  `.predict()` nem `.transform()` — não há coluna de distância ao centro para esse algoritmo, e
+  o `fit_predict()` precisa rodar direto na base completa (sem "transferir" um modelo já treinado).
+
+---
+
+## 3. Métricas de Clusterização (resultados e interpretação)
+
+### 3.1 K-Means
 
 | k | Inertia | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
 |---|---|---|---|---|---|---|
@@ -39,8 +63,7 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 | 7 | 4768.35 | 0.1439 | 1.5780 | 187.86 | 0.5082 | 0.0780 |
 | 8 | 4526.41 | 0.1453 | 1.5987 | 180.34 | 0.5151 | 0.0868 |
 
-### 2.3 Interpretação
-
+**Interpretação:**
 - **Silhouette** fica baixo em todos os k's testados (máximo 0.178, em k=3), o que indica que,
   com essas 6 variáveis, os clientes que cancelaram **não formam grupos claramente separados**
   — há sobreposição relevante entre os clusters independente do k escolhido.
@@ -51,26 +74,15 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 - **Estabilidade** é o dado mais decisivo: k=4 se destaca isoladamente (ARI médio de 0.87,
   desvio de apenas 0.12), enquanto os demais valores de k (incluindo k=3, com ARI de 0.54 e
   desvio de 0.29) mostram soluções bem menos consistentes entre reamostragens.
-- **Conclusão parcial (k-means):** k=3 não é claramente ruim, mas também não se destaca — vence
-  o silhouette por margem pequena e perde nas demais métricas. **k=4** é o candidato mais forte,
+- **Conclusão parcial:** k=3 não é claramente ruim, mas também não se destaca — vence o
+  silhouette por margem pequena e perde nas demais métricas. **k=4** é o candidato mais forte,
   por reunir estabilidade muito superior e métricas de separação comparáveis ou melhores.
 - **Candidatos selecionados para classificação: k=3 e k=4.**
 - **Ressalva geral:** como o silhouette é baixo mesmo no melhor k, vale considerar, em versões
   futuras, incluir variáveis adicionais (categóricas/comportamentais) ou testar algoritmos que
   lidam melhor com fronteiras pouco nítidas entre grupos.
 
----
-
-## 3. K-Medoids
-
-### 3.1 Setup
-
-- Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler` (ajustado separadamente para
-  essa base, não reaproveitado do `df_treino` completo).
-- `KMedoids(method='alternate', init='k-medoids++', random_state=42)`, testado para k = 2 a 7.
-- Estabilidade calculada com a mesma lógica de bootstrap + ARI usada no k-means.
-
-### 3.2 Resultados
+### 3.2 K-Medoids
 
 | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
 |---|---|---|---|---|---|
@@ -81,8 +93,7 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 | 6 | 0.1091 | 1.7759 | 158.50 | **0.2615** | 0.0519 |
 | 7 | **0.1200** | **1.7710** | 157.93 | 0.2603 | 0.0554 |
 
-### 3.3 Interpretação
-
+**Interpretação:**
 - **Qualidade geral bem mais fraca que o k-means em todas as métricas.** Silhouette (0.097–0.120)
   fica abaixo da faixa do k-means (0.14–0.18) — usar um cliente real como representante do cluster,
   em vez do centro médio calculado, não ajudou a separar melhor os grupos.
@@ -95,16 +106,10 @@ de churn e validar qual número de clusters melhor representa a estrutura dos da
 - **Candidatos selecionados para classificação: k=6 e k=7** — reúnem o melhor equilíbrio entre
   Davies-Bouldin (empatados como melhores do grupo), estabilidade (as duas mais altas) e
   silhouette (k=7 é o melhor do grupo; k=6 logo atrás).
-- **Comparação preliminar com k-means:** o K-Medoids parece se ajustar pior à estrutura desses
-  dados — todas as métricas são mais fracas, principalmente a estabilidade. O k-means segue como
-  referência mais forte entre os algoritmos testados até aqui, mas vale confirmar isso quando
-  k=6/k=7 do K-Medoids forem testados nos classificadores (lembrando que k=4 do k-means, apesar
-  de "vencedor" na clusterização, só se mostrou útil como feature preditiva no XGBoost).
 
-### 3.4 Métricas na base geral (df_treino completo)
-
-Recalculadas reaproveitando os labels já gerados em `Cluster_k6`/`Cluster_k7` no `df_treino`
-completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` próprio dessa base.
+**Métricas na base geral (`df_treino` completo)** — recalculadas reaproveitando os labels já
+gerados em `Cluster_k6`/`Cluster_k7` no `df_treino` completo (7.000 clientes, cancelados e não
+cancelados), com `X_scaled_geral` próprio dessa base:
 
 | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
 |---|---|---|---|---|---|
@@ -118,18 +123,7 @@ completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` pr
   vs ~1.426 clientes) — a diferença de escala não indica melhora real de separação.
 - Não há motivo, com esses números, para reconsiderar os candidatos já escolhidos (k=6 e k=7).
 
----
-
-## 4. Agglomerative Clustering (Clustering Hierárquico)
-
-### 4.1 Setup
-
-- Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler`.
-- `AgglomerativeClustering(linkage='ward')`, testado para k = 2 a 7.
-- Estabilidade calculada com a mesma lógica de bootstrap + ARI (sem `random_state`, já que o
-  algoritmo é determinístico dado o dataset).
-
-### 4.2 Resultados
+### 3.3 Agglomerative Clustering
 
 | k | Linkage | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
 |---|---|---|---|---|---|---|
@@ -140,8 +134,7 @@ completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` pr
 | 6 | ward | 0.0909 | **1.7268** | 160.20 | 0.4431 | 0.0648 |
 | 7 | ward | 0.0967 | 1.8473 | 149.76 | 0.3797 | 0.0576 |
 
-### 4.3 Interpretação
-
+**Interpretação:**
 - **k=3 se destaca isoladamente como o melhor k do algoritmo**: maior estabilidade da tabela
   (ARI de 0.657, bem à frente de qualquer outro k), maior Calinski-Harabasz (212.37) e segundo
   melhor silhouette (0.162, praticamente empatado com k=2).
@@ -156,10 +149,9 @@ completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` pr
   estabilidade e Calinski-Harabasz mais fortes; k=6 como segundo candidato, pelo melhor
   Davies-Bouldin e estabilidade competitiva (levemente acima de k=5).
 
-### 4.4 Métricas na base geral (df_treino completo)
-
-Recalculadas reaproveitando os labels já gerados em `Cluster_k3`/`Cluster_k6` no `df_treino`
-completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` próprio dessa base.
+**Métricas na base geral (`df_treino` completo)** — recalculadas reaproveitando os labels já
+gerados em `Cluster_k3`/`Cluster_k6` no `df_treino` completo, com `X_scaled_geral` próprio dessa
+base:
 
 | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI médio) | Estabilidade (desvio) |
 |---|---|---|---|---|---|
@@ -175,141 +167,7 @@ completo (7.000 clientes, cancelados + não cancelados), com `X_scaled_geral` pr
   o dobro. Entre os dois "desafiantes" do k-means, o **Agglomerative k=3** é o candidato mais
   promissor para competir na etapa de classificação.
 
----
-
-## 5. Árvore de Decisão + Grid Search (feature de cluster do K-Means)
-
-### 5.1 Setup
-
-- Base: `df_treino` completo (clientes que saíram e que não saíram), com a coluna `Saiu` como alvo.
-- Features por teste: `variaveis_numericas` + `Cluster_k{k}` + `Distancia_Centroide_k{k}`
-  (uma feature de cluster diferente para cada k testado, gerada a partir do k-means na seção 2).
-- Split treino/teste único (80/20, `stratify=Saiu`, `random_state=42`), **reaproveitado em todos
-  os k's**, para garantir que a comparação entre eles seja justa (só a feature de cluster muda).
-- `GridSearchCV` sobre `DecisionTreeClassifier`, `cv=5`, `scoring='f1'` (accuracy não é uma boa
-  métrica-guia aqui por causa do desbalanceamento das classes).
-- Grid de hiperparâmetros: `max_depth` [3, 5, 7, 10, None], `min_samples_split` [2, 5, 10],
-  `min_samples_leaf` [1, 2, 5], `criterion` ['gini', 'entropy'] — 90 combinações × 5 folds = 450
-  treinos por valor de k.
-
-### 5.2 Resultados
-
-| k | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|---|---|---|---|---|---|---|
-| 2 | criterion=gini, max_depth=5, ... | 0.8386 | 0.6630 | 0.4211 | 0.5150 | 0.8199 |
-| 3 | criterion=entropy, max_depth=5, ... | 0.8457 | 0.6806 | 0.4561 | **0.5462** | 0.8171 |
-| 4 | criterion=entropy, max_depth=10, ... | 0.8057 | 0.5286 | 0.4211 | 0.4688 | 0.7618 |
-| 5 | criterion=gini, max_depth=7, ... | 0.8314 | 0.6150 | 0.4596 | 0.5261 | 0.8150 |
-| 6 | criterion=entropy, max_depth=10, ... | 0.8157 | 0.5534 | 0.4912 | 0.5204 | 0.7410 |
-| 7 | criterion=gini, max_depth=7, ... | 0.8321 | 0.6289 | 0.4281 | 0.5094 | 0.8120 |
-
-### 5.3 Interpretação
-
-- **Melhor desempenho geral: k=3** — maior accuracy (0.846), maior precision (0.681) e maior F1
-  (0.546); ROC-AUC (0.817) fica tecnicamente atrás só de k=2 (0.820), diferença desprezível.
-- **Pior desempenho: k=4** — accuracy, precision, F1 e ROC-AUC mais baixos do grupo (junto com k=6).
-- **k=6** tem o maior recall (0.491), ou seja, é o que mais identifica os clientes que de fato
-  cancelaram — mas à custa de precision e ROC-AUC mais baixos, indicando pior generalização geral.
-- **Recall baixo em todos os k's** (0.42–0.49): o modelo deixa passar mais da metade dos clientes
-  que realmente cancelam, independente do k — ponto de atenção para negócio, possivelmente
-  resolvido ajustando o threshold de decisão ou usando `class_weight='balanced'`.
-- **Contradição relevante com a clusterização (seção 2):** k=4 havia se destacado nas métricas
-  *internas* de clustering (estabilidade ARI de 0.87), mas aqui é o pior para prever `Saiu`. Já
-  k=3, que era mediano na clusterização, é o melhor preditor. Isso reforça que "cluster bem
-  formado" (separação/estabilidade) e "cluster útil para prever o alvo" são coisas diferentes —
-  um cluster pode ser matematicamente consistente sem guardar relação com a variável de interesse.
-
-### 5.4 Baseline (sem feature de cluster)
-
-Mesmo setup da seção 5.1 (mesmo split treino/teste, mesma grid search), usando **apenas**
-`variaveis_numericas` — sem `Cluster_k{k}` nem `Distancia_Centroide_k{k}`.
-
-| | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|---|---|---|---|---|---|---|
-| Baseline | criterion=gini, max_depth=7, ... | 0.8400 | 0.6473 | 0.4702 | 0.5447 | 0.8091 |
-
-**Conclusão: a feature de cluster não agrega valor preditivo real.**
-
-- O F1 do baseline (0.5447) é praticamente idêntico ao do melhor k, k=3 (0.5462) — diferença de
-  0.0015, dentro da margem de ruído, não uma melhora real. Todos os demais k's (2, 4, 5, 6, 7)
-  ficam **abaixo** do baseline em F1.
-- O recall do baseline (0.4702) é maior que o de k=2, k=3, k=4, k=5 e k=7 — só perde para k=6
-  (0.4912). Ou seja, adicionar a feature de cluster não ajudou a capturar mais casos de churn;
-  em vários k's, atrapalhou.
-- No ROC-AUC, o baseline (0.8091) fica no meio da tabela: perde para k=2, k=3, k=5, k=7, mas
-  ganha de k=4 e k=6 — sem padrão claro de que o cluster ajuda ou atrapalha nessa métrica.
-- **Interpretação prática:** as variáveis originais já carregam praticamente toda a informação
-  que a árvore consegue usar para prever `Saiu`. A árvore de decisão, por natureza, já cria seus
-  próprios "clusters implícitos" através dos splits — então a coluna de cluster gerada
-  externamente via k-means é, na melhor das hipóteses (k=3), redundante, e na pior (k=4, k=6),
-  uma variável de baixo sinal que confunde o modelo.
-
----
-
-## 6. Random Forest + Grid Search (feature de cluster do K-Means)
-
-### 6.1 Setup
-
-- Mesmo split treino/teste (`idx_train`/`idx_test`) e mesmas features por k (`variaveis_numericas`
-  + `Cluster_k{k}` + `Distancia_Centroide_k{k}`) usados na árvore de decisão (seção 5), para manter
-  a comparação entre algoritmos justa.
-- `GridSearchCV` sobre `RandomForestClassifier(random_state=42, n_jobs=-1)`, `cv=5`, `scoring='f1'`.
-- Grid de hiperparâmetros: `n_estimators` [100, 200, 300], `max_depth` [5, 10, None],
-  `min_samples_split` [2, 5], `min_samples_leaf` [1, 2], `max_features` ['sqrt', 'log2']
-  — 72 combinações × 5 folds = 360 florestas treinadas por valor de k (`criterion` deixado de
-  fora do grid para manter o custo computacional viável).
-
-### 6.2 Resultados (com feature de cluster)
-
-| k | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|---|---|---|---|---|---|---|
-| 2 | max_depth=10, max_features=log2, ... | 0.8407 | 0.6722 | 0.4246 | 0.5204 | 0.8212 |
-| 3 | max_depth=None, max_features=log2, ... | 0.8350 | 0.6500 | 0.4105 | 0.5032 | 0.8174 |
-| 4 | max_depth=None, max_features=log2, ... | 0.8314 | 0.6256 | 0.4281 | 0.5083 | 0.8171 |
-| 5 | max_depth=None, max_features=log2, ... | 0.8293 | 0.6150 | 0.4316 | 0.5072 | 0.8187 |
-| 6 | max_depth=None, max_features=log2, ... | 0.8307 | 0.6263 | 0.4175 | 0.5011 | 0.8185 |
-| 7 | max_depth=10, max_features=log2, ... | 0.8393 | 0.6705 | 0.4140 | 0.5119 | **0.8267** |
-
-### 6.3 Baseline (sem feature de cluster)
-
-| | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|---|---|---|---|---|---|---|
-| Baseline | max_depth=10, max_features=sqrt, ... | 0.8436 | 0.6919 | 0.4175 | **0.5208** | **0.8272** |
-
-### 6.4 Interpretação
-
-- **Variação entre k's muito menor que na árvore de decisão**: o F1 oscila só entre 0.501 e 0.520
-  (range de 0.019), contra 0.469–0.546 (range de 0.077) na árvore isolada. Isso é esperado — o
-  Random Forest combina centenas de árvores treinadas em subamostras com features sorteadas
-  aleatoriamente, o que dilui o peso de qualquer feature individual, inclusive a de cluster.
-- **O baseline vence (ou empata) em praticamente tudo**: F1 do baseline (0.5208) é o maior valor
-  da tabela, levemente acima até de k=2 (0.5204, melhor com cluster); ROC-AUC do baseline (0.8272)
-  também é o maior de todos, levemente acima de k=7 (0.8267); precision do baseline (0.6919)
-  supera todos os k's. **Nenhuma versão com cluster supera o baseline de forma relevante.**
-- **Confirma e reforça a conclusão da árvore de decisão (seção 5.4)**: a feature de cluster do
-  k-means não agrega valor preditivo. Com Random Forest a evidência é ainda mais clara, já que
-  aqui nem o melhor k conseguiu superar o baseline em nenhuma métrica.
-- **Comparação entre algoritmos de classificação:**
-
-  | | Melhor F1 | Melhor ROC-AUC |
-  |---|---|---|
-  | Árvore de decisão | 0.546 (k=3, com cluster) | 0.820 (k=2, com cluster) |
-  | Random Forest | 0.521 (baseline) | 0.827 (baseline) |
-  | XGBoost | 0.538 (k=4, com cluster) | 0.831 (k=4, com cluster) |
-
-  A árvore de decisão (k=3) teve o melhor F1 entre árvore/RF. Já o XGBoost com k=4 foi o melhor
-  resultado do estudo inteiro em ambas as métricas — e o único caso em que a feature de cluster
-  superou claramente o baseline, coincidindo com o k que teve a maior estabilidade na
-  clusterização (seção 2). O Random Forest baseline teve o melhor ROC-AUC entre árvore/RF.
-- **Próximo passo sugerido:** extrair `feature_importances_` do melhor modelo de cada k para
-  confirmar, numericamente, se `Cluster_k{k}` teve importância próxima de zero — mais uma
-  evidência a favor da conclusão acima.
-
----
-
-## 7. Comparação entre algoritmos
-
-### 7.1 Ranking geral de todos os k's testados (score composto)
+### 3.4 Ranking geral de todos os k's testados (score composto)
 
 **Metodologia**: cada métrica foi normalizada (min-max) entre os 19 resultados (7 do K-Means,
 6 do Agglomerative, 6 do K-Medoids, todos calculados em `df_treino_cancelamento`); Davies-Bouldin
@@ -352,7 +210,7 @@ empiricamente, a métrica mais decisiva neste estudo.
   maior que a própria média — resultado próximo do acaso, apesar de entrarem bem posicionadas
   no score composto; tratar com desconfiança mesmo com score aparentemente competitivo.
 
-### 7.2 Clusterização — melhor k de cada algoritmo (métricas internas)
+### 3.5 Comparação entre algoritmos (melhor k de cada um)
 
 | Algoritmo | Melhor k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) |
 |---|---|---|---|---|---|
@@ -365,15 +223,15 @@ com folga em estabilidade (a métrica mais decisiva) e em Calinski-Harabasz; o A
 em segundo lugar competitivo (estabilidade de 0.657 não é desprezível); o K-Medoids é claramente
 o mais fraco dos três em praticamente todas as métricas.
 
-### 7.3 Ressalva importante — clusterização ≠ poder preditivo
+### 3.6 Ressalva importante — clusterização ≠ poder preditivo
 
-Como já vimos nas seções 5 e 6, "melhor clusterização" (métricas internas) e "melhor feature para
-prever `Saiu`" (métricas de classificação) já se mostraram coisas diferentes: o k=4 do k-means,
-vencedor isolado em estabilidade, foi o pior para árvore de decisão e Random Forest, e só se
-revelou útil no XGBoost. Por isso, o ranking acima **não define sozinho** qual algoritmo/k deve
-seguir para a etapa de classificação — ele serve para justificar a escolha dos candidatos
-(k-means k=3/k=4, Agglomerative k=3/k=6, K-Medoids k=6/k=7), mas a palavra final depende de como
-cada um se sai nos classificadores (árvore, Random Forest, XGBoost, SVM, Naive Bayes + baseline).
+"Melhor clusterização" (métricas internas) e "melhor feature para prever `Saiu`" (métricas de
+classificação) já se mostraram coisas diferentes: o k=4 do k-means, vencedor isolado em
+estabilidade, foi o pior para árvore de decisão e Random Forest, e só se revelou útil no XGBoost
+(seção 5). Por isso, o ranking acima **não define sozinho** qual algoritmo/k deve seguir para a
+etapa de classificação — ele serve para justificar a escolha dos candidatos (k-means k=3/k=4,
+Agglomerative k=3/k=6, K-Medoids k=6/k=7), mas a palavra final depende de como cada um se sai nos
+classificadores (árvore, Random Forest, XGBoost, SVM, Naive Bayes + baseline).
 
 *(preencher, após testar os candidatos de Agglomerative e K-Medoids nos classificadores: qual
 combinação algoritmo + k + classificador deu o melhor resultado preditivo, e se as segmentações
@@ -381,6 +239,165 @@ fazem sentido de negócio ao olhar o perfil médio de cada cluster nas variávei
 
 ---
 
-## 8. Conclusão e recomendação final
+## 4. Algoritmos de Classificação (setup)
 
-*(preencher ao final — recomendação de algoritmo/k para seguir para a etapa de classificação)*
+### 4.1 Árvore de Decisão + Grid Search (feature de cluster do K-Means)
+
+- Base: `df_treino` completo (clientes que saíram e que não saíram), com a coluna `Saiu` como alvo.
+- Features por teste: `variaveis_numericas` + `Cluster_k{k}` + `Distancia_Centroide_k{k}`
+  (uma feature de cluster diferente para cada k testado, gerada a partir do k-means na seção 2).
+- Split treino/teste único (80/20, `stratify=Saiu`, `random_state=42`), **reaproveitado em todos
+  os k's**, para garantir que a comparação entre eles seja justa (só a feature de cluster muda).
+- `GridSearchCV` sobre `DecisionTreeClassifier`, `cv=5`, `scoring='f1'` (accuracy não é uma boa
+  métrica-guia aqui por causa do desbalanceamento das classes).
+- Grid de hiperparâmetros: `max_depth` [3, 5, 7, 10, None], `min_samples_split` [2, 5, 10],
+  `min_samples_leaf` [1, 2, 5], `criterion` ['gini', 'entropy'] — 90 combinações × 5 folds = 450
+  treinos por valor de k.
+
+### 4.2 Random Forest + Grid Search (feature de cluster do K-Means)
+
+- Mesmo split treino/teste (`idx_train`/`idx_test`) e mesmas features por k (`variaveis_numericas`
+  + `Cluster_k{k}` + `Distancia_Centroide_k{k}`) usados na árvore de decisão, para manter a
+  comparação entre algoritmos justa.
+- `GridSearchCV` sobre `RandomForestClassifier(random_state=42, n_jobs=-1)`, `cv=5`, `scoring='f1'`.
+- Grid de hiperparâmetros: `n_estimators` [100, 200, 300], `max_depth` [5, 10, None],
+  `min_samples_split` [2, 5], `min_samples_leaf` [1, 2], `max_features` ['sqrt', 'log2']
+  — 72 combinações × 5 folds = 360 florestas treinadas por valor de k (`criterion` deixado de
+  fora do grid para manter o custo computacional viável).
+
+---
+
+## 5. Métricas de Classificação (resultados e interpretação)
+
+### 5.1 Árvore de Decisão
+
+| k | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|---|
+| 2 | criterion=gini, max_depth=5, ... | 0.8386 | 0.6630 | 0.4211 | 0.5150 | 0.8199 |
+| 3 | criterion=entropy, max_depth=5, ... | 0.8457 | 0.6806 | 0.4561 | **0.5462** | 0.8171 |
+| 4 | criterion=entropy, max_depth=10, ... | 0.8057 | 0.5286 | 0.4211 | 0.4688 | 0.7618 |
+| 5 | criterion=gini, max_depth=7, ... | 0.8314 | 0.6150 | 0.4596 | 0.5261 | 0.8150 |
+| 6 | criterion=entropy, max_depth=10, ... | 0.8157 | 0.5534 | 0.4912 | 0.5204 | 0.7410 |
+| 7 | criterion=gini, max_depth=7, ... | 0.8321 | 0.6289 | 0.4281 | 0.5094 | 0.8120 |
+
+**Baseline (sem feature de cluster)** — mesmo split treino/teste, mesma grid search, usando
+**apenas** `variaveis_numericas`:
+
+| | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|---|
+| Baseline | criterion=gini, max_depth=7, ... | 0.8400 | 0.6473 | 0.4702 | 0.5447 | 0.8091 |
+
+**Interpretação:**
+- **Melhor desempenho geral: k=3** — maior accuracy (0.846), maior precision (0.681) e maior F1
+  (0.546); ROC-AUC (0.817) fica tecnicamente atrás só de k=2 (0.820), diferença desprezível.
+- **Pior desempenho: k=4** — accuracy, precision, F1 e ROC-AUC mais baixos do grupo (junto com k=6).
+- **k=6** tem o maior recall (0.491), ou seja, é o que mais identifica os clientes que de fato
+  cancelaram — mas à custa de precision e ROC-AUC mais baixos, indicando pior generalização geral.
+- **Recall baixo em todos os k's** (0.42–0.49): o modelo deixa passar mais da metade dos clientes
+  que realmente cancelam, independente do k — ponto de atenção para negócio, possivelmente
+  resolvido ajustando o threshold de decisão ou usando `class_weight='balanced'`.
+- **Contradição relevante com a clusterização (seção 3.1):** k=4 havia se destacado nas métricas
+  *internas* de clustering (estabilidade ARI de 0.87), mas aqui é o pior para prever `Saiu`. Já
+  k=3, que era mediano na clusterização, é o melhor preditor. Isso reforça que "cluster bem
+  formado" (separação/estabilidade) e "cluster útil para prever o alvo" são coisas diferentes.
+- **Baseline vs. cluster:** o F1 do baseline (0.5447) é praticamente idêntico ao do melhor k, k=3
+  (0.5462) — diferença de 0.0015, dentro da margem de ruído. Todos os demais k's ficam abaixo do
+  baseline em F1. O recall do baseline (0.4702) é maior que o de quase todos os k's (só perde
+  para k=6). **Conclusão: a feature de cluster do k-means não agrega valor preditivo real** para
+  a árvore de decisão — as variáveis originais já carregam praticamente toda a informação que o
+  modelo consegue usar; a árvore já cria seus próprios "clusters implícitos" via splits.
+
+### 5.2 Random Forest
+
+**Resultados (com feature de cluster):**
+
+| k | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|---|
+| 2 | max_depth=10, max_features=log2, ... | 0.8407 | 0.6722 | 0.4246 | 0.5204 | 0.8212 |
+| 3 | max_depth=None, max_features=log2, ... | 0.8350 | 0.6500 | 0.4105 | 0.5032 | 0.8174 |
+| 4 | max_depth=None, max_features=log2, ... | 0.8314 | 0.6256 | 0.4281 | 0.5083 | 0.8171 |
+| 5 | max_depth=None, max_features=log2, ... | 0.8293 | 0.6150 | 0.4316 | 0.5072 | 0.8187 |
+| 6 | max_depth=None, max_features=log2, ... | 0.8307 | 0.6263 | 0.4175 | 0.5011 | 0.8185 |
+| 7 | max_depth=10, max_features=log2, ... | 0.8393 | 0.6705 | 0.4140 | 0.5119 | **0.8267** |
+
+**Baseline (sem feature de cluster):**
+
+| | Melhores parâmetros | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|---|
+| Baseline | max_depth=10, max_features=sqrt, ... | 0.8436 | 0.6919 | 0.4175 | **0.5208** | **0.8272** |
+
+**Interpretação:**
+- **Variação entre k's muito menor que na árvore de decisão**: o F1 oscila só entre 0.501 e 0.520
+  (range de 0.019), contra 0.469–0.546 (range de 0.077) na árvore isolada. Isso é esperado — o
+  Random Forest combina centenas de árvores treinadas em subamostras com features sorteadas
+  aleatoriamente, o que dilui o peso de qualquer feature individual, inclusive a de cluster.
+- **O baseline vence (ou empata) em praticamente tudo**: F1 do baseline (0.5208) é o maior valor
+  da tabela, levemente acima até de k=2 (0.5204, melhor com cluster); ROC-AUC do baseline (0.8272)
+  também é o maior de todos, levemente acima de k=7 (0.8267); precision do baseline (0.6919)
+  supera todos os k's. **Nenhuma versão com cluster supera o baseline de forma relevante.**
+- **Confirma e reforça a conclusão da árvore de decisão**: a feature de cluster do k-means não
+  agrega valor preditivo. Com Random Forest a evidência é ainda mais clara, já que aqui nem o
+  melhor k conseguiu superar o baseline em nenhuma métrica.
+
+**Comparação entre algoritmos de classificação (melhores resultados de cada um):**
+
+| | Melhor F1 | Melhor ROC-AUC |
+|---|---|---|
+| Árvore de decisão | 0.546 (k=3, com cluster) | 0.820 (k=2, com cluster) |
+| Random Forest | 0.521 (baseline) | 0.827 (baseline) |
+| XGBoost | 0.538 (k=4, com cluster) | 0.831 (k=4, com cluster) |
+
+A árvore de decisão (k=3) teve o melhor F1 entre árvore/RF. Já o XGBoost com k=4 foi o melhor
+resultado do estudo inteiro em ambas as métricas — e o único caso em que a feature de cluster
+superou claramente o baseline, coincidindo com o k que teve a maior estabilidade na clusterização
+(seção 3.1). O Random Forest baseline teve o melhor ROC-AUC entre árvore/RF.
+
+**Próximo passo sugerido:** extrair `feature_importances_` do melhor modelo de cada k para
+confirmar, numericamente, se `Cluster_k{k}` teve importância próxima de zero — mais uma evidência
+a favor da conclusão acima.
+
+---
+
+## 6. Conclusão e recomendação final
+
+### 6.1 O processo de decisão em 4 camadas
+
+A escolha do "melhor cluster" não se apoiou numa métrica isolada — foi a convergência de quatro
+checagens independentes, cada uma respondendo a uma pergunta diferente:
+
+| Camada | Pergunta | Resultado |
+|---|---|---|
+| **1. Métricas de clusterização** | Qual agrupamento é matematicamente mais nítido e consistente? | **K-Means k=4** vence com folga (score composto 0.918, seção 3.4) |
+| **2. Validação de face (perfil)** | Os grupos que a métrica elogiou fazem sentido em português? | Sim — o k=4 revelou uma divisão real dentro do grupo majoritário do k=3: "cliente recente, salário menor" (30,3% da base) vs. "cliente antigo, salário maior" (33,0% da base), diferenciados por `TempoRelacionamento` e `SalarioEstimado` |
+| **3. Representatividade** | Os grupos são balanceados e evitam isolar outliers? | Sim — o menor grupo do k=4 tem 14,17% da base (202 clientes), nenhum cluster é ínfimo |
+| **4. Poder preditivo** | O cluster ajuda de fato a prever `Saiu`? | Sim, mas só no XGBoost — k=4 foi o único caso em todo o estudo em que a feature de cluster superou o baseline (F1 de 0.538 e ROC-AUC de 0.831, seção 5.2) |
+
+### 6.2 Recomendação final
+
+**K-Means com k=4** é a recomendação para seguir à etapa de validação, pelas seguintes razões,
+em ordem de peso:
+
+1. É o único candidato, entre os 19 testados (seção 3.4), que passou nas quatro camadas de
+   validação simultaneamente — as demais opções fortes (Agglomerative k=3, K-Means k=3) falharam
+   na camada 4: nenhuma delas superou o baseline em nenhum classificador testado.
+2. O ganho preditivo é modesto (cerca de 1 ponto percentual de F1 sobre o baseline), então a
+   recomendação prática é usar `Cluster_k4` como feature **especificamente em conjunto com
+   XGBoost** — não há evidência de que ela ajude árvore de decisão, Random Forest, ou (ainda a
+   confirmar) SVM/Naive Bayes.
+3. O perfil interpretável do k=4 (diferenciação por tempo de relacionamento e salário) tem valor
+   de negócio mesmo além da classificação — pode orientar ações de retenção segmentadas por
+   "cliente novo" vs. "cliente fidelizado" entre quem tem maior propensão a cancelar.
+
+### 6.3 Ressalvas e próximos passos
+
+- Os candidatos do Agglomerative (k=3, k=6) e K-Medoids (k=6, k=7) ainda não foram testados nos
+  classificadores — a recomendação acima pode mudar se algum desses, mesmo com métricas de
+  clusterização mais fracas, repetir o padrão do k=4 (surpresa positiva num classificador
+  específico). Vale rodar essa bateria antes de fechar a conclusão de forma definitiva.
+- Ainda não foram gerados os perfis dos candidatos do Agglomerative e K-Medoids — recomendável
+  completar essa análise para os 4 candidatos restantes, seguindo o mesmo processo de 4 camadas.
+- O silhouette baixo em todos os 19 candidatos testados (máximo de 0.178) é uma limitação
+  estrutural do estudo: mesmo o "melhor" cluster não representa uma separação forte entre os
+  clientes. Isso não invalida o k=4 como escolha relativa, mas reforça que a segmentação por
+  essas 6 variáveis numéricas tem valor limitado — incluir variáveis categóricas/comportamentais
+  em trabalhos futuros pode melhorar a qualidade da segmentação de forma mais substancial.
