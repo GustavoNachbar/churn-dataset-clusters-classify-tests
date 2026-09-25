@@ -25,20 +25,40 @@ traz resultados, interpretação e comparações.
 
 ## 2. Algoritmos de Clusterização (setup)
 
-### 2.1 K-Means
+### 2.1 Checagem de outliers (pré-clusterização)
+
+Detecção via IQR (fator 1.5) e Z-score (limite 3) em `df_treino_cancelamento`, nas 6 variáveis
+numéricas. Conclusão: **nenhum tratamento de outlier foi aplicado** — as variações identificadas
+refletem características genuínas do negócio, não anomalias.
+
+| Variável | Outliers (IQR) | Outliers (Z-score) | Decisão |
+|---|---|---|---|
+| PontuacaoCredito | 5 (0,35%) | 0 | Não tratar — percentual irrisório, variável não diferencia clusters |
+| Idade | 10 (0,70%) | 0 | Não tratar — percentual irrisório, variável não diferencia clusters |
+| TempoRelacionamento | 0 | 0 | N/A |
+| Saldo | 0 | 0 | N/A — distribuição bimodal real (25,1% da base tem saldo = 0), não outlier |
+| NumeroProdutos | 43 (3,02%) | 43 (3,02%) | Não tratar — variável discreta (1 a 4 produtos), distribuição decrescente natural (969/255/159/43); os 43 clientes com 4 produtos são o perfil "Multiprodutos Engajados" (cluster 0 do k=4), não uma anomalia |
+| SalarioEstimado | 0 | 0 | N/A |
+
+**Implicação importante:** o desempenho mais fraco do K-Medoids (algoritmo desenhado para ser
+mais robusto a outliers) frente ao K-Means **não pode ser atribuído a outliers** que ele deveria
+neutralizar — reforça que a diferença de performance entre os algoritmos é estrutural (forma dos
+dados/hiperparâmetros), não um artefato de dados sujos.
+
+### 2.2 K-Means
 
 - Pré-processamento: `StandardScaler` nas 6 variáveis numéricas, ajustado em `df_treino_cancelamento`
 - `KMeans(n_init=10, random_state=42)`, testado para k = 2 a 8
 - Estabilidade: bootstrap com 30 reamostragens, 80% dos dados por rodada, comparação via Adjusted Rand Index (ARI) contra o clustering na base completa
 
-### 2.2 K-Medoids
+### 2.3 K-Medoids
 
 - Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler` (ajustado separadamente para
   essa base, não reaproveitado do `df_treino` completo).
 - `KMedoids(method='alternate', init='k-medoids++', random_state=42)`, testado para k = 2 a 7.
 - Estabilidade calculada com a mesma lógica de bootstrap + ARI usada no k-means.
 
-### 2.3 Agglomerative Clustering (Clustering Hierárquico)
+### 2.4 Agglomerative Clustering (Clustering Hierárquico)
 
 - Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler`.
 - `AgglomerativeClustering(linkage='ward')`, testado para k = 2 a 7.
@@ -358,9 +378,50 @@ a favor da conclusão acima.
 
 ---
 
-## 6. Conclusão e recomendação final
+## 6. Perfis dos Clusters — K-Means k=4 (modelo vencedor)
 
-### 6.1 O processo de decisão em 4 camadas
+Perfil calculado sobre `df_treino_cancelamento` (médias das variáveis originais, não
+padronizadas, por cluster). Idade e Pontuação de Crédito ficam praticamente iguais nos 4 grupos
+(~44 anos, ~640-650 pontos) — não são diferenciadores; a segmentação ocorre por Saldo, Número de
+Produtos, Tempo de Relacionamento e Salário.
+
+| Cluster | Nome de negócio | % da base | n | Saldo médio | Nº Produtos | Tempo de Relac. | Salário Estimado |
+|---|---|---|---|---|---|---|---|
+| 0 | **Multiprodutos Engajados** | 14,2% | 202 | R$ 86.799 | **3,21** | 5,1 anos | R$ 107.713 |
+| 1 | **Novatos Afluentes** | 30,3% | 432 | R$ 120.935 | 1,20 | **2,4 anos** | R$ 82.901 |
+| 2 | **Veteranos Consolidados** | 33,0% | 470 | R$ 123.911 | 1,21 | **7,4 anos** | R$ 116.490 |
+| 3 | **Saldo Zerado** | 22,6% | 322 | **R$ 2.870** | 1,21 | 5,1 anos | R$ 102.553 |
+
+**Caracterização de cada grupo:**
+
+- **Cluster 0 — Multiprodutos Engajados (14,2%):** único grupo com múltiplos produtos (3,21,
+  contra ~1,2 nos demais). Saldo médio-alto e o maior salário estimado do grupo. Cancela mesmo
+  usando bastante o banco — sugere que a causa pode estar ligada a insatisfação com o serviço,
+  não a desengajamento.
+- **Cluster 1 — Novatos Afluentes (30,3%):** saldo alto, mas relacionamento recente (2,4 anos, o
+  mais baixo de todos) e o menor salário estimado do grupo. Cliente que chegou há pouco tempo com
+  dinheiro considerável, mas cancela cedo — possível sinal de falha no onboarding/atendimento
+  inicial.
+- **Cluster 2 — Veteranos Consolidados (33,0%):** saldo mais alto de todos, relacionamento mais
+  longo (7,4 anos) e maior salário estimado. Mesmo sendo o perfil "ideal" em teoria (fiel,
+  endinheirado), ainda cancela — indica causa provavelmente pontual (oferta de concorrente,
+  mudança de vida), não falta de vínculo.
+- **Cluster 3 — Saldo Zerado (22,6%):** saldo praticamente zero (R$ 2.870), mono-produto, tempo
+  de relacionamento mediano. Perfil mais "óbvio" de churn — cliente que já esvaziou a conta antes
+  de sair, possivelmente já vinha se desengajando havia tempo.
+
+**Conexão com o resultado de classificação (seção 5.2):** a diferença entre "Novatos Afluentes" e
+"Veteranos Consolidados" é sutil — ambos têm saldo alto e salário considerável; a distinção real
+está no tempo de relacionamento (2,4 vs 7,4 anos). Essa nuance provavelmente explica por que o
+XGBoost conseguiu extrair valor do k=4 enquanto árvore de decisão e Random Forest não: um
+classificador mais simples tende a não isolar bem essa diferença fina, mas o processo de
+correção sequencial do XGBoost conseguiu captá-la.
+
+---
+
+## 7. Conclusão e recomendação final
+
+### 7.1 O processo de decisão em 4 camadas
 
 A escolha do "melhor cluster" não se apoiou numa métrica isolada — foi a convergência de quatro
 checagens independentes, cada uma respondendo a uma pergunta diferente:
@@ -372,7 +433,7 @@ checagens independentes, cada uma respondendo a uma pergunta diferente:
 | **3. Representatividade** | Os grupos são balanceados e evitam isolar outliers? | Sim — o menor grupo do k=4 tem 14,17% da base (202 clientes), nenhum cluster é ínfimo |
 | **4. Poder preditivo** | O cluster ajuda de fato a prever `Saiu`? | Sim, mas só no XGBoost — k=4 foi o único caso em todo o estudo em que a feature de cluster superou o baseline (F1 de 0.538 e ROC-AUC de 0.831, seção 5.2) |
 
-### 6.2 Recomendação final
+### 7.2 Recomendação final
 
 **K-Means com k=4** é a recomendação para seguir à etapa de validação, pelas seguintes razões,
 em ordem de peso:
@@ -388,7 +449,7 @@ em ordem de peso:
    de negócio mesmo além da classificação — pode orientar ações de retenção segmentadas por
    "cliente novo" vs. "cliente fidelizado" entre quem tem maior propensão a cancelar.
 
-### 6.3 Ressalvas e próximos passos
+### 7.3 Ressalvas e próximos passos
 
 - Os candidatos do Agglomerative (k=3, k=6) e K-Medoids (k=6, k=7) ainda não foram testados nos
   classificadores — a recomendação acima pode mudar se algum desses, mesmo com métricas de
@@ -401,3 +462,63 @@ em ordem de peso:
   clientes. Isso não invalida o k=4 como escolha relativa, mas reforça que a segmentação por
   essas 6 variáveis numéricas tem valor limitado — incluir variáveis categóricas/comportamentais
   em trabalhos futuros pode melhorar a qualidade da segmentação de forma mais substancial.
+
+---
+
+## Apêndice — Sensibilidade a Hiperparâmetros (curiosidade, não usado na decisão final)
+
+**Aviso:** os testes abaixo variam hiperparâmetros dos algoritmos (não só o k) e servem apenas
+para checar a robustez das conclusões das seções 2-3. Os candidatos oficiais selecionados nas
+seções 3.2 e 3.3 **não foram alterados** com base nesses resultados.
+
+### A.1 K-Medoids — `method='alternate'` vs. `method='pam'`
+
+| Method | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) | Estabilidade (desvio) |
+|---|---|---|---|---|---|---|
+| alternate | 2 | 0.1174 | 2.6777 | 184.02 | 0.0655 | 0.0806 |
+| alternate | 3 | 0.0971 | 2.3613 | 159.32 | 0.1235 | 0.0668 |
+| alternate | 4 | 0.1029 | 2.0737 | 160.24 | 0.1622 | 0.0501 |
+| alternate | 5 | 0.1159 | 1.8890 | 164.82 | 0.2337 | 0.0650 |
+| alternate | 6 | 0.1091 | 1.7759 | 158.50 | 0.2615 | 0.0519 |
+| alternate | 7 | 0.1200 | 1.7710 | 157.93 | 0.2603 | 0.0554 |
+| **pam** | 2 | 0.1246 | 2.6483 | 189.91 | 0.3077 | 0.3012 |
+| **pam** | 3 | 0.1265 | 2.2061 | 198.03 | 0.2362 | 0.1758 |
+| **pam** | **4** | **0.1524** | **1.8136** | **221.07** | **0.5391** | 0.2012 |
+| **pam** | 5 | 0.1367 | 1.7429 | 199.99 | 0.4494 | 0.0787 |
+| **pam** | 6 | 0.1370 | 1.7476 | 187.16 | 0.4175 | 0.0684 |
+| **pam** | 7 | 0.1397 | 1.7399 | 178.19 | 0.4895 | 0.1377 |
+
+Ranking por score composto (normalizado dentro dessas 12 combinações): **pam k=4** é disparado o
+melhor (score 0.984), seguido por pam k=5/7/6 — os 4 primeiros lugares são todos `pam`. O
+`method='pam'` supera `'alternate'` de forma consistente em todos os k's testados, aproximando o
+K-Medoids bastante do K-Means (pam k=4: silhouette 0.152 e Davies-Bouldin 1.814, quase empatados
+com K-Means k=4: 0.162 e 1.826) — a estabilidade ainda fica atrás (0.539 vs 0.870), mas a distância
+entre os dois algoritmos diminui bastante em relação ao que o `alternate` sugeria.
+
+### A.2 Agglomerative — `linkage='ward'` vs. `'average'` vs. `'complete'`
+
+| Linkage | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) | Score |
+|---|---|---|---|---|---|---|
+| **ward** | **3** | 0.1616 | 1.9988 | 212.37 | 0.6574 | **0.833** |
+| ward | 4 | 0.1189 | 2.0308 | 192.90 | 0.4227 | 0.630 |
+| ward | 5 | 0.1018 | 1.8302 | 177.07 | 0.4385 | 0.627 |
+| ward | 6 | 0.0909 | 1.7268 | 160.20 | 0.4431 | 0.613 |
+| ward | 7 | 0.0967 | 1.8473 | 149.76 | 0.3797 | 0.558 |
+| average | 7 | 0.0473 | 1.2034 | 33.06 | 0.4756 | 0.519 |
+| ward | 2 | 0.1638 | 2.1841 | 191.81 | 0.1598 | 0.489 |
+| average | 2 | 0.2524 | 1.3217 | 3.73 | 0.1239 | 0.432 |
+| average | 4 | 0.0952 | 1.1364 | 6.78 | 0.2232 | 0.382 |
+| average | 3 | 0.1437 | 1.0911 | 3.04 | 0.1455 | 0.374 |
+| complete | 7 | 0.0692 | 2.2617 | 100.30 | 0.1565 | 0.314 |
+| average | 5 | 0.0430 | 1.1103 | 6.10 | 0.1753 | 0.310 |
+| complete | 6 | 0.0700 | 2.4176 | 109.78 | 0.1379 | 0.300 |
+| complete | 5 | 0.0670 | 2.7157 | 106.43 | 0.1091 | 0.251 |
+| average | 6 | 0.0120 | 0.8987 | 5.16 | 0.0877 | 0.246 |
+| complete | 3 | 0.0561 | 3.1563 | 93.85 | 0.0592 | 0.162 |
+| complete | 2 | 0.0745 | 3.3052 | 118.06 | 0.0170 | 0.162 |
+| complete | 4 | 0.0372 | 3.0329 | 83.91 | 0.0788 | 0.159 |
+
+Nenhuma surpresa: `ward` domina os 5 primeiros lugares. `average` e `complete` performam pior na
+maioria dos k's — vários resultados de `average` (k=3, 4, 5, 6) têm Calinski-Harabasz quase
+zerado (3 a 7), sinal de clusters praticamente indistinguíveis entre si. **A escolha original
+(ward, k=3) se confirma como a melhor configuração do algoritmo.**
