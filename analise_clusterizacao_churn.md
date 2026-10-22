@@ -462,3 +462,63 @@ em ordem de peso:
   clientes. Isso não invalida o k=4 como escolha relativa, mas reforça que a segmentação por
   essas 6 variáveis numéricas tem valor limitado — incluir variáveis categóricas/comportamentais
   em trabalhos futuros pode melhorar a qualidade da segmentação de forma mais substancial.
+
+---
+
+## Apêndice — Sensibilidade a Hiperparâmetros (curiosidade, não usado na decisão final)
+
+**Aviso:** os testes abaixo variam hiperparâmetros dos algoritmos (não só o k) e servem apenas
+para checar a robustez das conclusões das seções 2-3. Os candidatos oficiais selecionados nas
+seções 3.2 e 3.3 **não foram alterados** com base nesses resultados.
+
+### A.1 K-Medoids — `method='alternate'` vs. `method='pam'`
+
+| Method | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) | Estabilidade (desvio) |
+|---|---|---|---|---|---|---|
+| alternate | 2 | 0.1174 | 2.6777 | 184.02 | 0.0655 | 0.0806 |
+| alternate | 3 | 0.0971 | 2.3613 | 159.32 | 0.1235 | 0.0668 |
+| alternate | 4 | 0.1029 | 2.0737 | 160.24 | 0.1622 | 0.0501 |
+| alternate | 5 | 0.1159 | 1.8890 | 164.82 | 0.2337 | 0.0650 |
+| alternate | 6 | 0.1091 | 1.7759 | 158.50 | 0.2615 | 0.0519 |
+| alternate | 7 | 0.1200 | 1.7710 | 157.93 | 0.2603 | 0.0554 |
+| **pam** | 2 | 0.1246 | 2.6483 | 189.91 | 0.3077 | 0.3012 |
+| **pam** | 3 | 0.1265 | 2.2061 | 198.03 | 0.2362 | 0.1758 |
+| **pam** | **4** | **0.1524** | **1.8136** | **221.07** | **0.5391** | 0.2012 |
+| **pam** | 5 | 0.1367 | 1.7429 | 199.99 | 0.4494 | 0.0787 |
+| **pam** | 6 | 0.1370 | 1.7476 | 187.16 | 0.4175 | 0.0684 |
+| **pam** | 7 | 0.1397 | 1.7399 | 178.19 | 0.4895 | 0.1377 |
+
+Ranking por score composto (normalizado dentro dessas 12 combinações): **pam k=4** é disparado o
+melhor (score 0.984), seguido por pam k=5/7/6 — os 4 primeiros lugares são todos `pam`. O
+`method='pam'` supera `'alternate'` de forma consistente em todos os k's testados, aproximando o
+K-Medoids bastante do K-Means (pam k=4: silhouette 0.152 e Davies-Bouldin 1.814, quase empatados
+com K-Means k=4: 0.162 e 1.826) — a estabilidade ainda fica atrás (0.539 vs 0.870), mas a distância
+entre os dois algoritmos diminui bastante em relação ao que o `alternate` sugeria.
+
+### A.2 Agglomerative — `linkage='ward'` vs. `'average'` vs. `'complete'`
+
+| Linkage | k | Silhouette | Davies-Bouldin | Calinski-Harabasz | Estabilidade (ARI) | Score |
+|---|---|---|---|---|---|---|
+| **ward** | **3** | 0.1616 | 1.9988 | 212.37 | 0.6574 | **0.833** |
+| ward | 4 | 0.1189 | 2.0308 | 192.90 | 0.4227 | 0.630 |
+| ward | 5 | 0.1018 | 1.8302 | 177.07 | 0.4385 | 0.627 |
+| ward | 6 | 0.0909 | 1.7268 | 160.20 | 0.4431 | 0.613 |
+| ward | 7 | 0.0967 | 1.8473 | 149.76 | 0.3797 | 0.558 |
+| average | 7 | 0.0473 | 1.2034 | 33.06 | 0.4756 | 0.519 |
+| ward | 2 | 0.1638 | 2.1841 | 191.81 | 0.1598 | 0.489 |
+| average | 2 | 0.2524 | 1.3217 | 3.73 | 0.1239 | 0.432 |
+| average | 4 | 0.0952 | 1.1364 | 6.78 | 0.2232 | 0.382 |
+| average | 3 | 0.1437 | 1.0911 | 3.04 | 0.1455 | 0.374 |
+| complete | 7 | 0.0692 | 2.2617 | 100.30 | 0.1565 | 0.314 |
+| average | 5 | 0.0430 | 1.1103 | 6.10 | 0.1753 | 0.310 |
+| complete | 6 | 0.0700 | 2.4176 | 109.78 | 0.1379 | 0.300 |
+| complete | 5 | 0.0670 | 2.7157 | 106.43 | 0.1091 | 0.251 |
+| average | 6 | 0.0120 | 0.8987 | 5.16 | 0.0877 | 0.246 |
+| complete | 3 | 0.0561 | 3.1563 | 93.85 | 0.0592 | 0.162 |
+| complete | 2 | 0.0745 | 3.3052 | 118.06 | 0.0170 | 0.162 |
+| complete | 4 | 0.0372 | 3.0329 | 83.91 | 0.0788 | 0.159 |
+
+Nenhuma surpresa: `ward` domina os 5 primeiros lugares. `average` e `complete` performam pior na
+maioria dos k's — vários resultados de `average` (k=3, 4, 5, 6) têm Calinski-Harabasz quase
+zerado (3 a 7), sinal de clusters praticamente indistinguíveis entre si. **A escolha original
+(ward, k=3) se confirma como a melhor configuração do algoritmo.**
