@@ -25,20 +25,40 @@ traz resultados, interpretação e comparações.
 
 ## 2. Algoritmos de Clusterização (setup)
 
-### 2.1 K-Means
+### 2.1 Checagem de outliers (pré-clusterização)
+
+Detecção via IQR (fator 1.5) e Z-score (limite 3) em `df_treino_cancelamento`, nas 6 variáveis
+numéricas. Conclusão: **nenhum tratamento de outlier foi aplicado** — as variações identificadas
+refletem características genuínas do negócio, não anomalias.
+
+| Variável | Outliers (IQR) | Outliers (Z-score) | Decisão |
+|---|---|---|---|
+| PontuacaoCredito | 5 (0,35%) | 0 | Não tratar — percentual irrisório, variável não diferencia clusters |
+| Idade | 10 (0,70%) | 0 | Não tratar — percentual irrisório, variável não diferencia clusters |
+| TempoRelacionamento | 0 | 0 | N/A |
+| Saldo | 0 | 0 | N/A — distribuição bimodal real (25,1% da base tem saldo = 0), não outlier |
+| NumeroProdutos | 43 (3,02%) | 43 (3,02%) | Não tratar — variável discreta (1 a 4 produtos), distribuição decrescente natural (969/255/159/43); os 43 clientes com 4 produtos são o perfil "Multiprodutos Engajados" (cluster 0 do k=4), não uma anomalia |
+| SalarioEstimado | 0 | 0 | N/A |
+
+**Implicação importante:** o desempenho mais fraco do K-Medoids (algoritmo desenhado para ser
+mais robusto a outliers) frente ao K-Means **não pode ser atribuído a outliers** que ele deveria
+neutralizar — reforça que a diferença de performance entre os algoritmos é estrutural (forma dos
+dados/hiperparâmetros), não um artefato de dados sujos.
+
+### 2.2 K-Means
 
 - Pré-processamento: `StandardScaler` nas 6 variáveis numéricas, ajustado em `df_treino_cancelamento`
 - `KMeans(n_init=10, random_state=42)`, testado para k = 2 a 8
 - Estabilidade: bootstrap com 30 reamostragens, 80% dos dados por rodada, comparação via Adjusted Rand Index (ARI) contra o clustering na base completa
 
-### 2.2 K-Medoids
+### 2.3 K-Medoids
 
 - Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler` (ajustado separadamente para
   essa base, não reaproveitado do `df_treino` completo).
 - `KMedoids(method='alternate', init='k-medoids++', random_state=42)`, testado para k = 2 a 7.
 - Estabilidade calculada com a mesma lógica de bootstrap + ARI usada no k-means.
 
-### 2.3 Agglomerative Clustering (Clustering Hierárquico)
+### 2.4 Agglomerative Clustering (Clustering Hierárquico)
 
 - Mesma base (`df_treino_cancelamento`) e mesmo `StandardScaler`.
 - `AgglomerativeClustering(linkage='ward')`, testado para k = 2 a 7.
@@ -358,9 +378,50 @@ a favor da conclusão acima.
 
 ---
 
-## 6. Conclusão e recomendação final
+## 6. Perfis dos Clusters — K-Means k=4 (modelo vencedor)
 
-### 6.1 O processo de decisão em 4 camadas
+Perfil calculado sobre `df_treino_cancelamento` (médias das variáveis originais, não
+padronizadas, por cluster). Idade e Pontuação de Crédito ficam praticamente iguais nos 4 grupos
+(~44 anos, ~640-650 pontos) — não são diferenciadores; a segmentação ocorre por Saldo, Número de
+Produtos, Tempo de Relacionamento e Salário.
+
+| Cluster | Nome de negócio | % da base | n | Saldo médio | Nº Produtos | Tempo de Relac. | Salário Estimado |
+|---|---|---|---|---|---|---|---|
+| 0 | **Multiprodutos Engajados** | 14,2% | 202 | R$ 86.799 | **3,21** | 5,1 anos | R$ 107.713 |
+| 1 | **Novatos Afluentes** | 30,3% | 432 | R$ 120.935 | 1,20 | **2,4 anos** | R$ 82.901 |
+| 2 | **Veteranos Consolidados** | 33,0% | 470 | R$ 123.911 | 1,21 | **7,4 anos** | R$ 116.490 |
+| 3 | **Saldo Zerado** | 22,6% | 322 | **R$ 2.870** | 1,21 | 5,1 anos | R$ 102.553 |
+
+**Caracterização de cada grupo:**
+
+- **Cluster 0 — Multiprodutos Engajados (14,2%):** único grupo com múltiplos produtos (3,21,
+  contra ~1,2 nos demais). Saldo médio-alto e o maior salário estimado do grupo. Cancela mesmo
+  usando bastante o banco — sugere que a causa pode estar ligada a insatisfação com o serviço,
+  não a desengajamento.
+- **Cluster 1 — Novatos Afluentes (30,3%):** saldo alto, mas relacionamento recente (2,4 anos, o
+  mais baixo de todos) e o menor salário estimado do grupo. Cliente que chegou há pouco tempo com
+  dinheiro considerável, mas cancela cedo — possível sinal de falha no onboarding/atendimento
+  inicial.
+- **Cluster 2 — Veteranos Consolidados (33,0%):** saldo mais alto de todos, relacionamento mais
+  longo (7,4 anos) e maior salário estimado. Mesmo sendo o perfil "ideal" em teoria (fiel,
+  endinheirado), ainda cancela — indica causa provavelmente pontual (oferta de concorrente,
+  mudança de vida), não falta de vínculo.
+- **Cluster 3 — Saldo Zerado (22,6%):** saldo praticamente zero (R$ 2.870), mono-produto, tempo
+  de relacionamento mediano. Perfil mais "óbvio" de churn — cliente que já esvaziou a conta antes
+  de sair, possivelmente já vinha se desengajando havia tempo.
+
+**Conexão com o resultado de classificação (seção 5.2):** a diferença entre "Novatos Afluentes" e
+"Veteranos Consolidados" é sutil — ambos têm saldo alto e salário considerável; a distinção real
+está no tempo de relacionamento (2,4 vs 7,4 anos). Essa nuance provavelmente explica por que o
+XGBoost conseguiu extrair valor do k=4 enquanto árvore de decisão e Random Forest não: um
+classificador mais simples tende a não isolar bem essa diferença fina, mas o processo de
+correção sequencial do XGBoost conseguiu captá-la.
+
+---
+
+## 7. Conclusão e recomendação final
+
+### 7.1 O processo de decisão em 4 camadas
 
 A escolha do "melhor cluster" não se apoiou numa métrica isolada — foi a convergência de quatro
 checagens independentes, cada uma respondendo a uma pergunta diferente:
@@ -372,7 +433,7 @@ checagens independentes, cada uma respondendo a uma pergunta diferente:
 | **3. Representatividade** | Os grupos são balanceados e evitam isolar outliers? | Sim — o menor grupo do k=4 tem 14,17% da base (202 clientes), nenhum cluster é ínfimo |
 | **4. Poder preditivo** | O cluster ajuda de fato a prever `Saiu`? | Sim, mas só no XGBoost — k=4 foi o único caso em todo o estudo em que a feature de cluster superou o baseline (F1 de 0.538 e ROC-AUC de 0.831, seção 5.2) |
 
-### 6.2 Recomendação final
+### 7.2 Recomendação final
 
 **K-Means com k=4** é a recomendação para seguir à etapa de validação, pelas seguintes razões,
 em ordem de peso:
@@ -388,7 +449,7 @@ em ordem de peso:
    de negócio mesmo além da classificação — pode orientar ações de retenção segmentadas por
    "cliente novo" vs. "cliente fidelizado" entre quem tem maior propensão a cancelar.
 
-### 6.3 Ressalvas e próximos passos
+### 7.3 Ressalvas e próximos passos
 
 - Os candidatos do Agglomerative (k=3, k=6) e K-Medoids (k=6, k=7) ainda não foram testados nos
   classificadores — a recomendação acima pode mudar se algum desses, mesmo com métricas de
